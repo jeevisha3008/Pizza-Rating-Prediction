@@ -1,0 +1,617 @@
+---
+title: "PIZZA RATINGS PROJECT"
+author: "Puneet Bhatia, Jeevisha Anandani"
+output:
+  html_document: default
+  word_document: default
+---
+
+## {.tabset}
+
+
+### __Introduction__
+
+![](/Users/Jeevisha/Desktop/pizza-slices-clip-art-images.jpg){#id .class width=75%  height=40%}
+
+In this project our aim is to generate insights out of pizza restaurant data made available from one of the most popular applications, OneBite.
+
+__We will analyse and address the following business statements-__
+
+* Rating wise visualization of Restaurants in New York
+* consumer preference across categories of pizza in United States
+* Pricing of pizza across categories
+* Pizza ratings across various price categories
+* Cluster pizza retaurants
+* visualizing restaurants according to the clusters formed
+* Predict consumer ratings
+
+__We aim to address the defined business problems in the following ways-__
+
+* Visualise ratings of pizza restaurants through interactive maps
+* Using multiple graphical and statistical reprsentations analyse trends in pricing, consumer ratings and geographical locations
+* Conduct Hypothesis testing to compute if there is any significant diffenence between pizza ratings across price categories of restaurants
+* Cluster restraunts on the basis of variables like price category and various ratings
+* Fit a machine learning model to predict the consumer ratings
+
+__Current Proposed approach/analytic technique__
+
+* K-means clustering technique will be used to form clusters of restaurants
+* Predicting the consumer rating by using regression with inputs of Dave and provider ratings
+* 2 sample Z test for the difference of means will be used to test the NULL Hypothesis: There is no significant difference in the ratings of low and high price category of restaurants
+* Use interactive maps and bar graphs to understand the consumer preferences and pricing across various restaurants in New York
+
+__Benefit of the analysis__ 
+
+Our analysis will benefit the restaurant owners as well as the consumers
+
+* Upon understanding the consumer preferences the restaurant owners can better target them. 
+* Predicting the consumer ratings in advance on the basis of provider ratings then that can immensely help the owners. They can know on a scale how much the consumer is going to like them based on past behaviour for similar places and the available provider ratings. 
+* Through cluster analysis consumers will get to know which restraunt is the best taking into consideration consumer pizza ratings and price category of the restraunt. 
+
+
+### __Packages Required__
+
+```{r results='hide',message=FALSE,warning=FALSE}
+library(readr) # for Data Wrangling
+library(dplyr) # for Data Wrangling
+library(ggplot2) # for visualization
+library(plotly) # for interactive plots
+library(ggmap) # for heat map
+library(car) # for regression
+library(bootstrap) # for bootstrapping
+library(tidyverse) # for data wrangling
+
+#Clustering
+
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering algorithms & visualization
+library(gridExtra) # to show all clusters in one grid 
+
+#Visualizations
+
+library(leaflet) # for interactive maps
+
+```
+
+
+### __Data Preparation__
+
+
+__Source of Data-__
+
+* [Pizza_Barstool](https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_barstool.csv)
+* [Pizza_Datafinity](https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_datafiniti.csv)
+* [Pizza_Jared](https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_jared.csv)
+
+__Importing Data__
+
+```{r results='hide',message=FALSE,warning=FALSE}
+pizza_barstool <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_barstool.csv")
+pizza_datafiniti <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_datafiniti.csv")
+pizza_jared <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_jared.csv")
+```
+
+The purpose of the data is to find the best pizza restraunt, focusing on New york. To achieve that Tyler Ricards recorded the web traffic coming through the OneBite application.
+
+__Peculiarities of the source data-__
+
+```{r}
+head(pizza_barstool)
+dim(pizza_barstool) #463 rows and 22 variables
+colSums(is.na(pizza_barstool)) # 2 missing observations from latitude and longitude
+colSums(pizza_barstool == 0) # No of Zero values in each column
+
+
+head(pizza_datafiniti)
+dim(pizza_datafiniti) #10000 rows and 10 variables
+unique_pizza_datafiniti <- pizza_datafiniti %>% distinct() #2285 uniique rows
+colSums(is.na(unique_pizza_datafiniti)) # No missing values
+colSums(unique_pizza_datafiniti == 0) # 1852 0 values for price_range_min
+
+head(pizza_jared)
+dim(pizza_jared) #375 rows and 9 variables
+colSums(is.na(pizza_jared)) # 2 missing observations from percent
+colSums(pizza_jared == 0) # 104 zeros in votes and 5 in total_votes
+
+# Summarizing the data
+
+summary(select_if(pizza_barstool,is.numeric))
+table(pizza_barstool$price_level) # 0 and 3 price level have few observations
+
+
+```
+
+__Data Cleaning__
+
+
+* We generally employ data cleaning steps to derive relevant insights from the data and to get rid of garbage values
+* There are only two missing values in the lattitude and longitude column in the Barstool data. Also,   there is a value out of range in Dave's rating(11).No imputation is being performed as the count is   less than 5% of the data in both cases.
+* Critic ratings have 401 zeroes
+* Community ratings have 41 zeroes
+* Minimum price range contains 1852 zeroes
+* Votes have 104 zeroes
+* Apart from this the data is clean. 
+
+
+__CLEANING DATAFINITI__
+
+Creating NEW_CATEGORY column by clubbing similar categories
+
+```{r}
+
+head(unique_pizza_datafiniti)
+
+unique_pizza_datafiniti$categories <- toupper(unique_pizza_datafiniti$categories)
+New_pizza_datafiniti <- unique_pizza_datafiniti %>% 
+mutate(NEW_CATEGORY = case_when(str_detect(categories,"BAR|BREW|PUB|CLUB|LOUNGE") ~ 'ALCOHOL SERVING', str_detect(categories,"ITAL") ~ 'ITALIAN',str_detect(categories,"CATER") ~ 'CATERERS', TRUE ~ 'NORMAL PIZZA RESTAURANT'))
+
+```
+
+Checking the NEW_CATEGORY column
+
+```{r}
+table(New_pizza_datafiniti$NEW_CATEGORY)
+```
+
+__Cleaning Jared__
+
+```{r}
+
+dim(pizza_jared)
+
+# Removing rows with 0 total votes
+
+pizza_jared_rm_zero <- pizza_jared%>%
+               filter(total_votes != 0)
+
+# Checking new data
+
+dim(pizza_jared_rm_zero)
+
+# Converting answer to Numerical Rating
+
+pizza_jared_rm_zero <- pizza_jared_rm_zero %>%
+
+  mutate(Numerical_Rating = case_when(
+
+    answer=="Never Again" ~ 0,
+
+    answer=="Poor" ~ 2,
+
+    answer=="Fair" ~ 4,
+
+    answer=="Average" ~ 6,
+
+    answer=="Good"~ 8,
+
+    answer=="Excellent" ~ 10))
+
+# Calculating weighted numerical rating
+
+Jared_ratings <- pizza_jared_rm_zero %>% 
+  mutate(Weighted_Rating = Numerical_Rating*votes) %>%
+
+    group_by(place) %>%
+
+    summarise(Final_Rating = sum(Weighted_Rating)/sum(votes))
+
+# Looking at the final Jared Ratings
+
+head(Jared_ratings)
+
+dim(Jared_ratings)
+
+
+```
+
+
+
+### __Exploratory Data Analysis__
+
+__Correlation between various pizza ratings__
+
+```{r}
+
+pizza_barstool_2 <- pizza_barstool %>% 
+  rename(
+    all_score = review_stats_all_average_score,
+    community_score = review_stats_community_average_score,
+    critic_score = review_stats_critic_average_score,
+    dave_score = review_stats_dave_average_score
+    )
+data <- pizza_barstool_2 %>% select(provider_rating,community_score,critic_score,dave_score)
+
+data2 <- data[data$critic_score != 0 & data$community_score != 0,]
+
+# Correlation between critic score and dave score is 0.42
+
+cor(data2)
+
+data3 <- data[data$community_score != 0,]
+
+# Correlation between dave score and community score is 0.6
+# Correlation between provider_rating and community score is 0.32
+# Correlation between provider_rating and dave score is 0.22
+
+cor(data3)
+
+```
+
+Joining Jared and Barstool
+
+```{r}
+Jared_Barstool<- Jared_ratings %>% 
+  inner_join(pizza_barstool, by = c("place" = "name"))
+```
+
+Finding correlation between Jared Final Rating and Barstool All Average Rating
+
+```{r}
+cor(Jared_Barstool$Final_Rating,Jared_Barstool$review_stats_all_average_score) ## The correlation is not very high
+```
+
+__Comparing pizza ratings in New York with rest of the US__
+
+```{r}
+Newyork_Barstool <- pizza_barstool[str_detect(pizza_barstool$city,"York"),]
+Rest_Barstool <- pizza_barstool[!str_detect(pizza_barstool$city,"York"),]
+
+
+```
+New York has slightly lower provider and average ratings on average as compared to the rest of US
+
+```{r}
+mean(Newyork_Barstool$review_stats_all_average_score)
+mean(Rest_Barstool$review_stats_all_average_score)
+
+mean(Newyork_Barstool$provider_rating)
+mean(Rest_Barstool$provider_rating)
+```
+
+__Comparing pizza ratings across states__
+
+```{r}
+
+table((pizza_barstool %>% left_join(New_pizza_datafiniti%>% distinct(city,province),by = "city"))$province)     ## States except NY have few records
+
+
+table1 <- pizza_barstool %>% left_join(New_pizza_datafiniti%>% distinct(city,province),by = "city") %>% group_by(province) %>% summarise(Avg_provider_rating = mean(provider_rating)) %>% arrange(desc(Avg_provider_rating))   
+
+table1 = na.omit(table1)
+
+## Plotting state wise average provider ratings
+
+ggplot(data = table1, aes(x = reorder(province, -Avg_provider_rating), y = Avg_provider_rating)) +
+  geom_bar(colour="red2",stat = "identity",
+             position=position_dodge(),
+             size=.2,fill = 'blue') +                        
+    xlab("STATE") + ylab("AVERAGE PROVIDER RATING") + 
+    ggtitle("STATE WISE PROVIDER RATINGS") +     
+    theme_bw() + geom_text(aes(label=round(Avg_provider_rating,2)), position=position_dodge(width=0.9), vjust=-0.25)+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+table2 <- pizza_barstool %>% left_join(New_pizza_datafiniti%>% distinct(city,province),by = "city") %>% group_by(province) %>% summarise(Avg_All_Rating = mean(review_stats_all_average_score)) %>% arrange(desc(Avg_All_Rating))
+
+table2 = na.omit(table2)
+
+## Plotting state wise All average ratings
+
+ggplot(data = table2, aes(x = reorder(province, -Avg_All_Rating), y = Avg_All_Rating)) +
+  geom_bar(colour="red2",stat = "identity",
+             position=position_dodge(),
+             size=.2,fill = 'blue') +                        
+    xlab("STATE") + ylab("AVERAGE ALL RATING") + 
+    ggtitle("STATE WISE AVERAGE ALL AVERAGE RATING") +     
+    theme_bw() + geom_text(aes(label=round(Avg_All_Rating,2)), position=position_dodge(width=0.9), vjust=-0.25)+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+
+__Comparing ratings across categories__
+
+```{r}
+
+## Joining Datafinity and Barstool data
+
+Datafiniti_Barstool<- New_pizza_datafiniti %>% 
+  inner_join(pizza_barstool, by = "name", "city")
+
+dim(Datafiniti_Barstool)
+
+```
+
+
+Analysing ratings across pizza categories
+
+```{r}
+boxplot(review_stats_all_average_score~NEW_CATEGORY, data = Datafiniti_Barstool)
+boxplot(provider_rating~NEW_CATEGORY, data = Datafiniti_Barstool)
+```
+
+Normal Pizza Restraunts have slightly higher All average score as compared to those restaurants which serve Italian pizza, however provider_rating has very similar distribution across both the categories
+
+__Comparing price range across pizza categories__
+
+```{r}
+
+New_pizza_datafiniti %>% group_by(NEW_CATEGORY) %>% summarise(AVERAGE_MAX_PRICE = mean(price_range_max))
+
+New_pizza_datafiniti[New_pizza_datafiniti$price_range_min != 0,] %>% group_by(NEW_CATEGORY) %>% summarise(AVERAGE_MIN_PRICE = mean(price_range_min))
+```
+
+ALCOHOL SERVING PIZZA restaurants have the highest average min and max price range followed by ITALIAN PIZZA restaurants. CATERERS and NORMAL PIZZA restaurants have similar min and max price range
+
+
+
+### __Hypothesis Testing__
+
+__Question: Do higher priced restraunts have better ratings?__
+
+Analysing Provider Ratings
+```{r}
+
+Pricelow <- pizza_barstool[(pizza_barstool$price_level  == 1) | (pizza_barstool$price_level  == 0),]
+
+PriceHigh <- pizza_barstool[(pizza_barstool$price_level  == 2) | (pizza_barstool$price_level  == 3),]
+
+m1 <- mean(PriceHigh$provider_rating)
+m1
+m2 <- mean(Pricelow$provider_rating)
+m2
+
+n <- nrow(PriceHigh)
+n
+m <- nrow(Pricelow)
+m
+
+
+```
+
+__NULL HYPOTHESIS: m1 - m2 <= 0__
+__ALTERNATE HYPOTHESIS m1 - m2 > 0__
+
+```{r}
+se = sqrt(var(PriceHigh$provider_rating)/n + var(Pricelow$provider_rating)/m)
+se
+Z = (m1-m2)/se
+Z
+
+Zalpha = qnorm(0.90)
+Zalpha
+```
+
+__Z > Zalpha__ 
+
+__We can reject the NULL HYPOTHESIS with 90% confidence. Hence we can say higher priced restaurants have better mean provider_ratings as compared to lower priced restaurants with 90% confidence__
+
+Analysing All Average Score
+
+```{r}
+u1 <- mean(PriceHigh$review_stats_all_average_score)
+u1
+u2 <- mean(Pricelow$review_stats_all_average_score)
+u2
+
+
+```
+
+
+__NULL HYPOTHESIS: u1 - u2 <= 0__
+__ALTERNATE HYPOTHESIS u1 - u2 > 0__
+
+```{r}
+se2 = sqrt(var(PriceHigh$review_stats_all_average_score)/n + var(Pricelow$review_stats_all_average_score)/m)
+se2
+
+Z2 = (u1-u2)/se2
+Z2
+
+Zalpha2 = qnorm(0.99)
+Zalpha2
+```
+
+__Z2 > Zalpha2__
+
+__We can reject the NULL HYPOTHESIS with 99% confidence. Hence we can say higher priced restaurants have better mean all_average_score as compared to lower priced restaurants with 99% confidence.__
+
+### __Regression__
+
+__REGRESSION FOR PREDICTING COMMUNITY RATINGS (ONE BITE USER RATINGS)__
+
+```{r}
+
+## BOXCOX TRANSFORMATION TO GET LAMBDA
+
+bc <- MASS::boxcox(community_score ~ dave_score + provider_rating, data = data3)
+lambda <- bc$x[which.max(bc$y)]
+lambda
+data3$community_score2 <- ((data3$community_score ^ lambda) - 1) / lambda
+
+## POLYNOMIAL REGRESSION FOR PREDICTING COMMUNITY RATINGS
+
+fit <- lm(community_score2 ~ poly(dave_score,2) + poly(provider_rating,5), data = data3)
+
+
+
+
+
+```
+
+
+__Adjusted R square of the model is 0.46. Since we are predicting consumer ratings which has very high variation, we can accept this R square value. Also, p value associated with F test and most of the individual t tests in not significant and we can reject the NULL hypothesis at 95% confidence level.__
+
+```{r}
+summary(fit)
+```
+
+__Regression Equation__
+
+$$community\_score2 = \frac{community\_score^\lambda-1}{\lambda}$$
+
+$$community\_score2 = 25.3705 + 93.4312*dave\_score + 33.6138*dave\_score^2 + 31.7952*provider\_rating + 7.3717*provider\_rating^2 -9.4294*provider\_rating^3 + 12.9945*provider\_rating^4 - 13.2177*provider\_rating^5$$
+
+__PLOTTING AND ANALYSING THE RESIDUALS__
+
+By performing residual diagnostic, we can see that they satisfy our initial regression assumptions of-
+
+* Normality
+* Constant Variance
+* Mean 0
+
+```{r}
+plot(fit)
+```
+
+### __Clustering__
+
+We are going to cluster pizza restaurants on the basis of price level and community ratings
+
+```{r}
+
+#Removing zeroes
+pizza_barstool_rm <- pizza_barstool[pizza_barstool$review_stats_community_average_score!=0,]
+
+
+#Scaling data 
+
+pizza_barstool_cl <- scale(pizza_barstool_rm[c("review_stats_community_average_score","price_level")])
+
+## Creating multiple clusters with different centres
+
+set.seed(5021)
+
+k2 <- kmeans(pizza_barstool_cl, centers = 2, nstart = 25)
+k3 <- kmeans(pizza_barstool_cl, centers = 3, nstart = 25)
+k4 <- kmeans(pizza_barstool_cl, centers = 4, nstart = 25)
+k5 <- kmeans(pizza_barstool_cl, centers = 5, nstart = 25)
+
+str(k4)
+
+# Visualizing the clusters
+
+p2 <- fviz_cluster(k2, geom = "point", data = pizza_barstool_cl) + ggtitle("k = 2")
+p3 <- fviz_cluster(k3, geom = "point", data = pizza_barstool_cl) + ggtitle("k = 3")
+p4 <- fviz_cluster(k4, geom = "point", data = pizza_barstool_cl) + ggtitle("k = 4")
+p5 <- fviz_cluster(k5, geom = "point", data = pizza_barstool_cl) + ggtitle("k = 5")
+
+grid.arrange(p2, p3, p4, p5, nrow = 2)
+
+```
+
+```{r}
+
+#Elbow Curve to decide the optimum number of clusters looking at the bend
+
+fviz_nbclust(pizza_barstool_cl, kmeans, method = "wss")
+
+```
+```{r}
+
+# Comparing the clusters
+
+pizza_barstool_rm %>%
+  select("review_stats_community_average_score","price_level") %>%
+  mutate(Cluster = k4$cluster) %>%
+  group_by(Cluster) %>%
+  summarise_all("mean")
+
+```
+
+__So finally we have 4 cluster which signify-__
+
+* Cluster_1 - Low Rating and Low Price restaurants
+* Cluster_2 - High Rating and Low Price restaurants
+* Cluster_3 - High Rating and High Price restaurants
+* Cluster_4 - Low Rating and High Price restaurants
+
+__Visualization__
+
+```{r}
+
+#Based on Ratings
+
+Barstool_NY <- pizza_barstool[pizza_barstool$city=='New York',]%>%
+  na.omit(Barstool_NY)
+  
+  getColor <- function(Barstool_NY) {
+    sapply(Barstool_NY$review_stats_all_average_score, function(x) {
+      if(x <= 4.5) {
+        "red"
+      } else if(x <= 6.5) {
+        "orange"
+      } else {
+        "green"
+      } })
+  }
+  
+  icons <- awesomeIcons(
+    icon = 'ios-close',
+    iconColor = 'black',
+    library = 'ion',
+    markerColor = getColor(Barstool_NY)
+  )
+  
+  
+  leaflet(Barstool_NY) %>% 
+    addTiles() %>%
+    addAwesomeMarkers(~longitude, ~latitude, icon=icons, label=~as.character(name))%>%
+    addProviderTiles("CartoDB.Positron") %>%
+    setView(-73.98, 40.75, zoom = 14)
+  
+#Based on Clusters
+  
+  clustered_data <- cbind(k4$cluster,pizza_barstool_rm)%>%
+    na.omit(pizza_barstool_rm$latitude) %>%
+    na.omit(pizza_barstool_rm$longitude) %>%
+    filter(city=="New York")
+
+clustered_data['cluster'] <- clustered_data['k4$cluster'] 
+
+dim(clustered_data)
+  
+   getColor <- function(clustered_data) {
+    sapply(clustered_data$cluster, function(x) {
+      if(x == 1) {
+        "pink"
+      } else if(x == 2) {
+        "green"
+      } else if(x == 3) {
+        "orange"
+      }else {
+        "red"
+      } })
+  }
+  
+  icons <- awesomeIcons(
+    icon = 'ios-close',
+    iconColor = 'black',
+    library = 'ion',
+    markerColor = getColor(clustered_data)
+  )
+  
+  
+  leaflet(clustered_data) %>% 
+    addTiles() %>%
+    addAwesomeMarkers(~longitude, ~latitude, icon=icons, label=~as.character(name))%>%
+    addProviderTiles("CartoDB.Positron") %>%
+    setView(-73.98, 40.75, zoom = 12.5)
+```
+
+
+### __Summary__
+
+The above exercise helped us understand various trends in pizza ratings. The following is the summary of the analysis:
+
+* We find that the correlation between various pizza ratings is not very high
+* New York have lower provider and average pizza ratings on average as compared to rest of the US
+* States with high ratings- IA,OK,FL,OH
+  States with low ratings - WV,MI,NV,SC
+* Restaurants serving Italian Pizza have lower ratings on average as compared to Non Italian Pizza restaurants
+* Alcohol serving and Italian pizza restaurants have higher priced pizza as compared to those that do not fall in this category
+* High priced restaurants have better pizza ratings as compared to low priced restaurants
+
+
